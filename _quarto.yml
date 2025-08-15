@@ -1,8 +1,9 @@
 project:
   type: website
+  output-dir: docs
 
 website:
-  title: "tnsite"
+  title: "Tales of True North"
   navbar:
     left:
       - href: index.qmd
