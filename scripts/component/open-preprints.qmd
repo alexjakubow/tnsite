@@ -1,0 +1,367 @@
+---
+title: "Preprint Analysis"
+---
+
+
+# Overview
+> **This module examines candidacy criteria for open science among OSF Preprints.**
+
+## Definition
+
+We define an open preprint as one that meets the following criteria:
+
+1. Published
+2. Public
+3. Not deleted
+4. Not withdrawn
+
+## Current features
+
+The following table indicates the data features currently suported for these analyses.
+
+The data can be segmented in a variety of ways, each of on the basis of one or more disaggregation methods.
+
+- Each row in the table indicates the data features available for each segment/method combination (`Segment`, `Disaggregation method`).  
+- `Structure` incidates whether the data support cross-sectional (`CS`) or time-series cross-sectional (`TSCS`) analysis.  In the case of `TSCS` data, `Unit` indicates the smallest level of disaggregation available (`M` for months).
+-`Efficiency` indicates whether it is currently possible to calculate the proportion or share of research projects that meet the definition of lifecycle open science for each segment/method combination (`Y` for yes, `N` for no).
+
+
+| Segment              | Disaggregation method       | Structure | Unit | Efficiency |
+| -------------------- | --------------------------- | --------- | ---- | ---------- |
+| Aggregate            | -                           | TSCS      | M    | Y          |
+| OSFI                 | Dichotomous                 |           |      |            |
+| OSFI                 | Categorical                 |           |      |            |
+| Subjects             | Aggregate (parent subjects) | TSCS      | M    | Y          |
+| Subjects             | Detailed (child subjects)   |           |      |            |
+| Provider             | Categorical                 |           |      |            |
+| Creator demographics | Age cohort                  |           |      |            |
+
+
+# Data Preparation
+
+> This section generates the data we need from source database tables.  The end goal is to refactor and separate this section from the report, itself.
+
+## Methodology
+
+We can use the date variables in the `osf_preprint` table and related actions in the `osf_preprintlog` table to generate a time series of lifecycle open preprints. 
+
+From the `osf_preprint` table, we already know when the following actions occured:
+
+- `created`
+- `date_published`
+- `date_withdrawn`
+- `deleted`
+
+To get at *when* a preprint became public (as well as possible reversions to private status), we need to look for the `made_public` and `made_private` action types in the `osf_preprintlog` table.  
+
+If a preprint has no visibility actions in the log table *BUT* has `is_public == TRUE` in the `osf_preprint` table, we assume the preprint was made public at the time of creation (`created`)
+
+## Implementation
+
+```{r setup}
+# Packages
+library(arrow)
+library(dplyr)
+library(dm)
+library(ggplot2)
+library(lubridate)
+library(tidyr)
+library(purrr)
+
+# Modules
+box::use(
+    R/connect[stage_dm],
+    R/datamodel[pull_collect]
+)
+
+# Places
+PQDIR <- "~/osfdata/parquet"
+
+# Helper functions
+open_parquet <- function(dir = PQDIR, tbl) {
+    arrow::open_dataset(file.path(dir, paste0(tbl, ".parquet")))
+}
+get_parquet_info <- function(dir = PQDIR, tbl) {
+    nanoparquet::read_parquet_info(file.path(dir, paste0(tbl, ".parquet")))
+}
+```
+
+```{r}
+# Criteria
+PREPRINT_CRITERIA <- rlang::exprs(
+    !is.na(date_published),
+    !is.na(date_public),
+    is.na(deleted),
+    is.na(date_withdrawn)
+    )
+
+# Actions of interest to determine *if/when* preprints became public
+PUBLIC_ACTIONS <- c("made_public")
+PRIVATE_ACTIONS <- c("made_private")
+
+# Load tables
+preprint_tbl <- open_parquet(tbl = "osf_preprint") |>
+    select(id, is_public, is_published, created, date_published, date_withdrawn, deleted)
+
+pplog_tbl <- open_parquet(tbl = "osf_preprintlog") |>
+    select(preprint_id, action, created) |>
+    filter(action %in% c(PUBLIC_ACTIONS, PRIVATE_ACTIONS))
+```
+
+We create two new tables, one to capture the preprints that have always been public and another to focus in the preprints whose logged actions could incidicate potential changes in visibility over time.
+
+We will be able to set the value of a new variable, `date_public` for all preprints that have always been public.   For the other preprints with relevant logged actions, the value of `date_public` will be the date of the most recent logged action defined in `PUBLIC_ACTIONS` (i.e. `r PUBLIC_ACTIONS`).
+
+```{r}
+# Date of public visibility among preprints that MAY NOT have always been public
+logged_preprints <- pplog_tbl |>
+    to_duckdb() |>
+    summarise(
+        .by = preprint_id,
+        last_action_date = max(created),
+        last_action = last(action),
+    ) |>
+    mutate(
+        date_public = ifelse(
+            last_action %in% PUBLIC_ACTIONS,
+            last_action_date,
+            NA
+        )
+    ) |>
+    select(preprint_id, date_public) |>
+    to_arrow()
+
+# Rise and repeat for preprints that have ALWAYS been public
+always_preprints <- preprint_tbl |>
+    filter(is_public) |>
+    select(id, created) |>
+    anti_join(logged_preprints, by = c("id" = "preprint_id")) |>
+    rename(
+        preprint_id = id,
+        date_public = created
+    )
+
+# Combine
+all_preprints <- bind_rows(
+    collect(always_preprints),
+    collect(logged_preprints)
+    )
+
+# Now, let's create a new table for LOS preprints
+los_preprints <- preprint_tbl |>
+    select(id, date_published, date_withdrawn, created, deleted) |>
+    collect() |>
+    left_join(all_preprints, by = c("id" = "preprint_id"))
+
+# Quick check of observations
+nrow(los_preprints) == nrow(preprint_tbl)
+
+# Write to parquet
+write_parquet(los_preprints, here::here("data", "preprints.parquet"))
+```
+
+## Aggregate time series
+
+We first summarize preprints by various openness criteria over time.
+
+```{r}
+# Set time span
+TIMESPAN <- c("2018-01-01", "2025-06-01")
+DELTA <- "month"
+DATES <- seq(as.POSIXct(TIMESPAN[1]), as.POSIXct(TIMESPAN[2]), by = DELTA)
+```
+
+Specifically, we compute the following sums for each year-month in the time series:
+
+- `n_total`: All preprints created on or before this date
+- `n_public`: Number of public preprints
+- `n_published`: Number of published preprints
+- `n_withdrawn`: Number of withdrawn preprints
+- `n_deleted`: Number of preprints deleted on or before this date
+- `n_valid`: Number of valid preprints (i.e., not deleted or withdrawn)
+- `n_open`: Number of preprints that are both published and public on or before a given date (i.e., union of `n_published` and `n_public`)
+- `n_open_valid`: Number of preprints that both *open* and *valid* on or before a given date (i.e., union of `n_open` and `n_valid`)
+
+Then, we derive the following quantities of interest from these sums:
+
+- `pct_valid`: Proportion of valid preprints (i.e., not deleted or withdrawn) created on or before this date that are not deleted or withdrawn
+- `open_efficiency`: Proportion of *all* preprints that are both published and public on or before this date
+- `open_efficiency_valid`: Proportion of *valid* preprints that are both published and public on or before this date
+
+```{r}
+state_summary <- purrr::map(
+    DATES,
+    ~los_preprints |>
+        filter(created <= .x) |>
+        summarise(
+            n_total = n(),
+            n_public = sum(!is.na(date_public)),
+            n_published = sum(!is.na(date_published)),
+            n_withdrawn = sum(!is.na(date_withdrawn)),
+            n_deleted = sum(!is.na(deleted)),
+            n_valid = sum(is.na(date_withdrawn) & is.na(deleted)),
+            n_open = sum(!is.na(date_published) & !is.na(date_public)),
+            n_open_valid = sum(!is.na(date_published) & !is.na(date_public) & is.na(date_withdrawn) & is.na(deleted)),
+        ) |>
+        mutate(
+            pct_valid = n_valid / n_total,
+            open_efficiency = n_open / n_total,
+            open_efficiency_valid = n_open_valid / n_valid
+        ),
+    .progress = TRUE) |>
+    set_names(DATES) |>
+    list_rbind(names_to = "date")
+
+# Save
+write_parquet(state_summary, here::here("data", "preprint_summary.parquet"))
+```
+
+# Results
+
+## Aggregate results
+
+Now, we plot the relationship between these quantities over time.
+
+```{r}
+state_summary_long <- state_summary |>
+    pivot_longer(
+        cols = starts_with("n_"),
+        names_to = "state",
+        names_prefix = "n_",
+        values_to = "n"
+    )
+    
+state_summary_long |>
+    filter(state %in% c("total", "valid", "open", "open_valid")) |>
+    mutate(state = factor(state, levels = c("total", "valid", "open", "open_valid"))) |>
+    ggplot(aes(x = as.Date(date), y = n, group = state, color = state)) + 
+    geom_line() +
+    theme_minimal() +
+    scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+    scale_y_continuous(labels = scales::comma) +
+    labs(y = "Number of preprints", x = "Date") +
+    theme(legend.position = "bottom")
+```
+
+We can also visualze the efficiencies over time.
+
+```{r}
+state_summary |>
+    pivot_longer(
+        cols = starts_with("open_"),
+        names_to = "state",
+        names_prefix = "open_",
+        values_to = "p"
+    ) |>
+    filter(grepl("efficiency", state)) |>
+    mutate(state = factor(state, levels = c("efficiency", "efficiency_valid"))) |>
+    ggplot(aes(x = as.Date(date), y = p, group = state, color = state)) +
+    geom_line() +
+    theme_minimal() +
+    scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+    scale_y_continuous(labels = scales::percent) +
+    labs(y = "Efficiency", x = "Date") +
+    theme(legend.position = "bottom", legend.title = element_blank())
+```
+
+## Faceting by subject
+
+We can also plot the distribution of subjects over time among, total, valid, and open preprints.  To ease interpretation, we focus on "top-level" subject fields and restrict the analysis to subjects representing at least 5% of all preprints.
+
+```{r}
+subjects_tbl <- open_dataset(here::here("data", "preprint_subjects.parquet")) |>
+    filter(is.na(parent_id)) |>
+    mutate(subject_text = ifelse(is.na(subject_text), "None", subject_text))
+preprints_tbl <- open_dataset(here::here("data", "preprints.parquet"))
+
+# Combine
+preprints_with_subjects <- preprints_tbl |>
+    left_join(subjects_tbl, by = c("id" = "preprint_id")) |>
+    select(-subject_id, -parent_id) 
+
+# Get distribution of subjects among preprints
+subject_distribution <- preprints_with_subjects |>
+    to_duckdb() |>
+    summarise(
+        .by = subject_text,
+        n = n(),
+        first_created = min(created),
+        first_valid = min(created[is.na(date_withdrawn) & is.na(deleted)])
+    ) |>
+    mutate(prop = n / sum(n)) |>
+    collect() 
+
+# Subjects corresponding at at least 5% of all preprints
+subjects <- subject_distribution |>
+    filter(prop >= 0.05) |>
+    pull(subject_text)
+
+subject_summary <- purrr::map(
+    .x = DATES,
+    ~ preprints_with_subjects |>
+        filter(created <= .x & subject_text %in% subjects) |>
+        to_duckdb() |>
+        summarise(
+            .by = subject_text,
+            n_total = n(),
+            n_valid = sum(is.na(date_withdrawn) & is.na(deleted)),
+            n_open = sum(!is.na(date_published) & !is.na(date_public)),
+            n_open_valid = sum(!is.na(date_published) & !is.na(date_public) & is.na(date_withdrawn) & is.na(deleted)),
+        ) |>
+        mutate(
+            pct_valid = n_valid / n_total,
+            open_efficiency = n_open / n_total,
+            open_efficiency_valid = n_open_valid / n_valid
+        ) |>
+        collect(),
+    .progress = TRUE) |>
+    set_names(DATES) |>
+    list_rbind(names_to = "date") 
+```
+
+Now we can plot the distribution of subjects over time among, total, valid, and open preprints.
+
+```{r}
+plot_tbl <- subject_summary |>
+    select(date, subject_text, n_total, n_valid, n_open, n_open_valid) |>
+    pivot_longer(
+        cols = starts_with("n_"),
+        names_to = "state",
+        names_prefix = "n_",
+        values_to = "n"
+    ) |>
+    mutate(state = factor(state, levels = c("total", "valid", "open", "open_valid")))
+
+plot_tbl |>
+    ggplot(aes(x = as.Date(date), y = n, group = state, color = state)) + 
+    geom_line() +
+    theme_minimal() +
+    scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+    scale_y_continuous(labels = scales::comma) +
+    facet_wrap(~subject_text, scales = "free_y") +
+    labs(y = "Number of preprints", x = "Date") +
+    theme(legend.position = "bottom")
+```
+
+We can also compare the efficiencies.
+
+```{r}
+plot_tbl <- subject_summary |>
+    select(date, subject_text, open_efficiency, open_efficiency_valid) |>
+    pivot_longer(
+        cols = starts_with("open_"),
+        names_to = "efficiency",
+        names_prefix = "open_",
+        values_to = "p"
+    ) 
+
+plot_tbl |>
+    ggplot(aes(x = as.Date(date), y = p, color = subject_text, group = subject_text)) +
+    geom_line() +
+    theme_minimal() +
+    scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+    scale_y_continuous(labels = scales::percent) +
+    facet_wrap(~efficiency) +
+    labs(y = "Efficiency", x = "Date") +
+    theme(legend.position = "bottom")
+```

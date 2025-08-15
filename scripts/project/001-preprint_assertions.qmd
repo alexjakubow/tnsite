@@ -1,0 +1,263 @@
+---
+title: "Recipe 001: Preprint Assertions"
+---
+
+# Overview
+> **This recipe measures lifecycle open science on OSF by looking at preprint assertions.**
+
+We define a lifecycle open research project as an Open OSF Preprint (see [open-preprints](./open-preprints.qmd)) that meets the following criteria:
+
+1. Has at least 1 linked dataset via author assertion
+2. Has at least 1 linked preregistration via author assertion
+
+## Supported Features
+
+The following table indicates the data features currently suported for this recipe.
+
+The data can be segmented in a variety of ways, each of on the basis of one or more disaggregation methods.  
+
+- Each row in the table indicates the data features available for each segment/method combination (`Segment`, `Disaggregation method`).
+- `Structure` incidates whether the data support cross-sectional (`CS`) or time-series cross-sectional (`TSCS`) analysis.  In the case of `TSCS` data, `Unit` indicates the smallest level of disaggregation available (`M` for months).
+- `Efficiency` indicates whether it is currently possible to calculate the proportion or share of research projects that meet the definition of lifecycle open science for each segment/method combination (`Y` for yes, `N` for no).
+
+
+| Segment              | Disaggregation method       | Structure | Unit | Efficiency |
+| -------------------- | --------------------------- | --------- | ---- | ---------- |
+| Aggregate            | -                           | TSCS      | M    | Y          |
+| OSFI                 | Dichotomous                 |           |      |            |
+| OSFI                 | Categorical                 |           |      |            |
+| Subjects             | Aggregate (parent subjects) |           |      |            |
+| Subjects             | Detailed (child subjects)   |           |      |            |
+| Provider             | Categorical                 |           |      |            |
+| Creator demographics | Age cohort                  |           |      |            |
+
+
+# Data Preparation
+
+> This section generates the data we need from source database tables.  The end goal is to refactor and separate this section from the report, itself.
+
+```{r setup}
+# Packages
+library(arrow)
+library(dplyr)
+library(dm)
+library(ggplot2)
+library(lubridate)
+library(tidyr)
+library(purrr)
+
+# Modules
+box::use(
+    R/connect[stage_dm],
+    R/datamodel[pull_collect]
+)
+
+# Places
+PQDIR <- "~/osfdata/parquet"
+
+# Helper functions
+open_parquet <- function(dir = PQDIR, tbl) {
+    arrow::open_dataset(file.path(dir, paste0(tbl, ".parquet")))
+}
+get_parquet_info <- function(dir = PQDIR, tbl) {
+    nanoparquet::read_parquet_info(file.path(dir, paste0(tbl, ".parquet")))
+}
+```
+
+## Methodology
+
+We can use the `osf_preprint` table and relevant actions in the `osf_preprintlog` table to determine when linked datasets and preregistrations were first added to the preprint.
+
+To get at *when* a preprint gets linked datasets and/or preregistrations added to it, we need to look for the `has_data_links_updated` and `has_prereg_links_updated` action types in the `osf_preprintlog` table.  
+If a preprint has no assertion actions in the log table *BUT* has corresponding flag values set to `TRUE` in the `osf_preprint` table, we assume the preprint contained the links at the time of creation (`created`).
+
+We can combine this new information with the datasets previously created in [open-preprints](./open-preprints.qmd) to create a time series of lifecycle open research projects.
+
+
+## Implementation
+```{r}
+LOS_CRITERIA <- rlang::exprs(
+    !is.na(date_published),
+    !is.na(date_public),
+    is.na(deleted),
+    is.na(date_withdrawn),
+    !is.na(date_data),
+    !is.na(date_prereg),
+)
+
+# Actions of interest
+OPEN_ACTIONS <- c("has_data_links_updated", "has_prereg_links_updated")
+
+# Load tables
+preprint_tbl <- open_parquet(tbl = "osf_preprint") |>
+    select(id, created, has_data_links, has_prereg_links) 
+pplog_tbl <- open_parquet(tbl = "osf_preprintlog") |>
+    select(preprint_id, action, created) |>
+    filter(action %in% OPEN_ACTIONS)
+los_preprint <- open_dataset(here::here("data", "preprints.parquet"))
+
+# Date(s) of first open actions among preprints that MAY NOT have always had them
+logged_preprints <- pplog_tbl |>
+    to_duckdb() |>
+    summarise(
+        .by = c(preprint_id, action),
+        action_date = min(created)
+    ) |>
+    select(preprint_id, action, action_date) |>
+    to_arrow() |>
+    mutate(
+        action = case_when(
+            action == "has_data_links_updated" ~ "date_data",
+            action == "has_prereg_links_updated" ~ "date_prereg"
+        )
+    ) |>
+    collect() |>
+    pivot_wider(
+        names_from = action,
+        values_from = action_date
+    ) 
+
+# Rise and repeat for preprints that have ALWAYS had them
+always_data_preprints <- preprint_tbl |>
+    filter(has_data_links == "available") |>
+    select(id, created) |>
+    anti_join(logged_preprints, by = c("id" = "preprint_id")) |>
+    rename(
+        preprint_id = id,
+        date_data = created
+    )
+always_prereg_preprints <- preprint_tbl |>
+    filter(has_prereg_links == "available") |>
+    select(id, created) |>
+    anti_join(logged_preprints, by = c("id" = "preprint_id")) |>
+    rename(
+        preprint_id = id,
+        date_prereg = created
+    )
+always_preprints <- always_data_preprints |>
+    left_join(
+        always_prereg_preprints,
+        by = "preprint_id"
+    ) 
+
+# Combine
+all_preprints <- bind_rows(
+    logged_preprints,
+    collect(always_preprints)
+    )
+
+# Now, let's create a new table for LOS projects
+los_projects <- los_preprint |>
+    collect() |>
+    left_join(all_preprints, by = c("id" = "preprint_id"))
+
+# We also want to add the latest of all required actions and linkages to determine when (if at all) the project achieved LOS status
+los_projects <- los_projects |>
+    mutate(
+        date_los = max(date_published, date_public, date_data, date_prereg, na.rm = TRUE),
+        date_los = ifelse(
+            !is.na(date_published) | !is.na(date_public) | !is.na(date_data) | !is.na(date_prereg) > 0, NA, date_los
+        ),
+        date_los_valid = case_when(
+            !is.na(deleted) | !is.na(date_withdrawn) ~ NA,
+            TRUE ~ date_los
+        )
+    )
+
+# Quick check of observations
+nrow(los_projects) == nrow(preprint_tbl)
+
+# Write to parquet
+write_parquet(los_projects, here::here("data", "los_001_pass.parquet"))
+```
+
+## Aggregate time series
+
+```{r}
+# Set time span
+TIMESPAN <- c("2018-01-01", "2025-06-01")
+DELTA <- "month"
+DATES <- seq(as.POSIXct(TIMESPAN[1]), as.POSIXct(TIMESPAN[2]), by = DELTA)
+```
+
+```{r}
+los_summary <- purrr::map(
+    DATES, 
+    ~ los_projects |>
+    filter(created <= .x) |>
+    summarise(
+        n_total = n(),
+        n_deleted = sum(!is.na(deleted)),
+        n_withdrawn = sum(!is.na(date_withdrawn)),
+        n_valid = sum(is.na(date_withdrawn) & is.na(deleted)),
+        # individually open components
+        n_open_preprint = sum(!is.na(date_published) & !is.na(date_public)),
+        n_open_data = sum(!is.na(date_data)),
+        n_open_prereg = sum(!is.na(date_prereg)),
+        # paired open components
+        n_open_data_prereg = sum(!is.na(date_data) & !is.na(date_prereg)),
+        n_open_preprint_data = sum(!is.na(date_published) & !is.na(date_public) & !is.na(date_data)),
+        n_open_preprint_prereg = sum(!is.na(date_published) & !is.na(date_public) & !is.na(date_prereg)),
+        # full life cycle open
+        n_los = sum(!is.na(date_los)),
+        n_los_valid = sum(!is.na(date_los_valid)),
+    ) |>
+    mutate(
+        n_mos = n_open_data_prereg + n_open_preprint_data + n_open_preprint_prereg,  #mos = "mostly open" (2/3)
+        n_pos = n_open_preprint + n_open_data + n_open_prereg,  #pos = "partially open" (1/3)
+        pct_valid = n_valid / n_total,
+        los_efficiency = n_los / n_total,
+        los_efficiency_valid = n_los_valid / n_valid
+    ),
+    .progress = TRUE) |>
+    set_names(DATES) |>
+    list_rbind(names_to = "date")
+
+# Save
+write_parquet(los_projects, here::here("data", "los_001_pass_summary.parquet"))
+```
+
+
+# Results
+```{r}
+los_summary_long <- los_summary |>
+    pivot_longer(
+        cols = starts_with("n_"),
+        names_to = "state",
+        names_prefix = "n_",
+        values_to = "n"
+    )
+    
+los_summary_long |>
+    filter(state %in% c("total", "valid", "los", "los_valid")) |>
+    mutate(state = factor(state, levels = c("total", "valid", "los", "los_valid"))) |>
+    ggplot(aes(x = as.Date(date), y = n, group = state, color = state)) + 
+    geom_line() +
+    theme_minimal() +
+    scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+    scale_y_continuous(labels = scales::comma) +
+    labs(y = "Number of projects", x = "Date") +
+    theme(legend.position = "bottom")
+```
+
+Note, these efficiencies are under-estimates, since we do not exclude preprints coming from provdiders that do not enable author assertions.
+
+```{r}
+los_summary |>
+    pivot_longer(
+        cols = starts_with("los_"),
+        names_to = "state",
+        names_prefix = "los_",
+        values_to = "p"
+    ) |>
+    filter(grepl("efficiency", state)) |>
+    mutate(state = factor(state, levels = c("efficiency", "efficiency_valid"))) |>
+    ggplot(aes(x = as.Date(date), y = p, group = state, color = state)) +
+    geom_line() +
+    theme_minimal() +
+    scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+    scale_y_continuous(labels = scales::percent) +
+    labs(y = "Efficiency", x = "Date") +
+    theme(legend.position = "bottom", legend.title = element_blank())
+```
+

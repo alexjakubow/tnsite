@@ -6,3 +6,6 @@
 .quarto
 
 /.quarto/
+
+.env
+data

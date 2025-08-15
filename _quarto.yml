@@ -8,15 +8,21 @@ website:
     left:
       - href: index.qmd
         text: Home
-      - about.qmd
+      - scripts/component/open-preprints.qmd
+      - scripts/project/001-preprint_assertions.qmd
 
 format:
   html:
+    code-fold: true
+    code-line-numbers: true
+    code-summary: "See the code"
+    code-block-border-left: true
     theme:
       - cosmo
       - brand
     css: styles.css
     toc: true
 
-
-
+execute:
+  warning: false
+  message: false
