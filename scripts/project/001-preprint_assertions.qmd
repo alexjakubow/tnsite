@@ -46,12 +46,6 @@ library(lubridate)
 library(tidyr)
 library(purrr)
 
-# Modules
-box::use(
-    R/connect[stage_dm],
-    R/datamodel[pull_collect]
-)
-
 # Places
 PQDIR <- "~/osfdata/parquet"
 
@@ -240,7 +234,7 @@ los_summary_long |>
     theme(legend.position = "bottom")
 ```
 
-Note, these efficiencies are under-estimates, since we do not exclude preprints coming from provdiders that do not enable author assertions.
+Note, these efficiencies are under-estimates, since we do not exclude preprints coming from providers that do not enable author assertions.
 
 ```{r}
 los_summary |>

@@ -1,3 +1,7 @@
+box::use(
+  R / parameters[PARQUET_PATH],
+)
+
 # RELATIONAL KEY HELPERS -------------------------------------------------------
 # NOTE: These are not exported, but are used internally by `stage_dm()`
 
@@ -64,7 +68,8 @@ add_all_keys <- function(dm, tbl_pk, tbl_fk) {
 stage_dm <- function(
   db = Sys.getenv("DUCKDB_PATH"),
   keyfile = Sys.getenv("KEYFILE"),
-  read_only = TRUE
+  read_only = TRUE,
+  keyed = TRUE
 ) {
   # Initialize connection
   con <- DBI::dbConnect(duckdb::duckdb(dbdir = db, read_only = read_only))
@@ -73,8 +78,11 @@ stage_dm <- function(
   duck_dm <- dm::dm_from_con(con, learn_keys = FALSE)
 
   # Add keys from keyfile
-  keys <- readRDS(keyfile)
-  duck_dm <- add_all_keys(duck_dm, keys$primary_keys, keys$foreign_keys)
+  if (keyed) {
+    keys <- readRDS(keyfile)
+    duck_dm <- add_all_keys(duck_dm, keys$primary_keys, keys$foreign_keys)
+  }
+
   return(duck_dm)
 }
 
@@ -91,7 +99,6 @@ pg_connect <- function() {
   )
 }
 
-
 #' Stage a data model from OSF PostgreSQL database
 #'
 #' Bundles together `pg_connect()` and `dm_from_con()` so that connection to PostgreSQL database and creation of the data model can be done in one step
@@ -99,4 +106,21 @@ pg_connect <- function() {
 stage_pg <- function() {
   pg <- pg_connect()
   dm::dm_from_con(pg, learn_keys = TRUE)
+}
+
+
+# ARROW HELPERS ----------------------------------------------------------------
+#' Open an OSF Parquet dataset
+#'
+#' @param dir Path to directory containing Parquet files.  Defaults `PARQUET_PATH`, defined in `R/parameters.r`.
+#' @param tbl Name of Parquet file (i.e., OSF database table)
+#' @param duck Logical. Should the dataset be converted to a DuckDB dataset using `duckdb::as_duckdb()`?  Defaults to `TRUE`.
+#' @export
+open_parquet <- function(dir = PARQUET_PATH, tbl, duck = TRUE) {
+  if (duck) {
+    arrow::open_dataset(file.path(dir, paste0(tbl, ".parquet"))) |>
+      arrow::to_duckdb()
+  } else {
+    arrow::open_dataset(file.path(dir, paste0(tbl, ".parquet")))
+  }
 }

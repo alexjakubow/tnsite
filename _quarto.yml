@@ -8,6 +8,7 @@ website:
     left:
       - href: index.qmd
         text: Home
+      - scripts/component/open-registrations.qmd
       - scripts/component/open-preprints.qmd
       - scripts/project/001-preprint_assertions.qmd
 

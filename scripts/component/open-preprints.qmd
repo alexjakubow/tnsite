@@ -1,5 +1,5 @@
 ---
-title: "Preprint Analysis"
+title: "OSF Preprints"
 ---
 
 
@@ -62,17 +62,10 @@ If a preprint has no visibility actions in the log table *BUT* has `is_public ==
 # Packages
 library(arrow)
 library(dplyr)
-library(dm)
 library(ggplot2)
 library(lubridate)
 library(tidyr)
 library(purrr)
-
-# Modules
-box::use(
-    R/connect[stage_dm],
-    R/datamodel[pull_collect]
-)
 
 # Places
 PQDIR <- "~/osfdata/parquet"

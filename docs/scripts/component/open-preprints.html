@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
-<title>Preprint Analysis – Tales of True North</title>
+<title>OSF Preprints – Tales of True North</title>
 <style>
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
@@ -129,12 +129,12 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span class="menu-text">Home</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link active" href="../../scripts/component/open-preprints.html" aria-current="page"> 
-<span class="menu-text">Preprint Analysis</span></a>
+    <a class="nav-link" href="../../scripts/component/open-registrations.html"> 
+<span class="menu-text">OSF Registrations</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="../../scripts/project/001-preprint_assertions.html"> 
-<span class="menu-text">Recipe 001: Preprint Assertions</span></a>
+    <a class="nav-link active" href="../../scripts/component/open-preprints.html" aria-current="page"> 
+<span class="menu-text">OSF Preprints</span></a>
   </li>  
 </ul>
           </div> <!-- /navcollapse -->
@@ -176,7 +176,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 
 <header id="title-block-header" class="quarto-title-block default">
 <div class="quarto-title">
-<h1 class="title">Preprint Analysis</h1>
+<h1 class="title">OSF Preprints</h1>
 </div>
 
 
@@ -314,28 +314,21 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <div class="sourceCode cell-code" id="cb1"><pre class="sourceCode numberSource r number-lines code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1"></a><span class="co"># Packages</span></span>
 <span id="cb1-2"><a href="#cb1-2"></a><span class="fu">library</span>(arrow)</span>
 <span id="cb1-3"><a href="#cb1-3"></a><span class="fu">library</span>(dplyr)</span>
-<span id="cb1-4"><a href="#cb1-4"></a><span class="fu">library</span>(dm)</span>
-<span id="cb1-5"><a href="#cb1-5"></a><span class="fu">library</span>(ggplot2)</span>
-<span id="cb1-6"><a href="#cb1-6"></a><span class="fu">library</span>(lubridate)</span>
-<span id="cb1-7"><a href="#cb1-7"></a><span class="fu">library</span>(tidyr)</span>
-<span id="cb1-8"><a href="#cb1-8"></a><span class="fu">library</span>(purrr)</span>
-<span id="cb1-9"><a href="#cb1-9"></a></span>
-<span id="cb1-10"><a href="#cb1-10"></a><span class="co"># Modules</span></span>
-<span id="cb1-11"><a href="#cb1-11"></a>box<span class="sc">::</span><span class="fu">use</span>(</span>
-<span id="cb1-12"><a href="#cb1-12"></a>    R<span class="sc">/</span>connect[stage_dm],</span>
-<span id="cb1-13"><a href="#cb1-13"></a>    R<span class="sc">/</span>datamodel[pull_collect]</span>
-<span id="cb1-14"><a href="#cb1-14"></a>)</span>
-<span id="cb1-15"><a href="#cb1-15"></a></span>
-<span id="cb1-16"><a href="#cb1-16"></a><span class="co"># Places</span></span>
-<span id="cb1-17"><a href="#cb1-17"></a>PQDIR <span class="ot">&lt;-</span> <span class="st">"~/osfdata/parquet"</span></span>
-<span id="cb1-18"><a href="#cb1-18"></a></span>
-<span id="cb1-19"><a href="#cb1-19"></a><span class="co"># Helper functions</span></span>
-<span id="cb1-20"><a href="#cb1-20"></a>open_parquet <span class="ot">&lt;-</span> <span class="cf">function</span>(<span class="at">dir =</span> PQDIR, tbl) {</span>
-<span id="cb1-21"><a href="#cb1-21"></a>    arrow<span class="sc">::</span><span class="fu">open_dataset</span>(<span class="fu">file.path</span>(dir, <span class="fu">paste0</span>(tbl, <span class="st">".parquet"</span>)))</span>
-<span id="cb1-22"><a href="#cb1-22"></a>}</span>
-<span id="cb1-23"><a href="#cb1-23"></a>get_parquet_info <span class="ot">&lt;-</span> <span class="cf">function</span>(<span class="at">dir =</span> PQDIR, tbl) {</span>
-<span id="cb1-24"><a href="#cb1-24"></a>    nanoparquet<span class="sc">::</span><span class="fu">read_parquet_info</span>(<span class="fu">file.path</span>(dir, <span class="fu">paste0</span>(tbl, <span class="st">".parquet"</span>)))</span>
-<span id="cb1-25"><a href="#cb1-25"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb1-4"><a href="#cb1-4"></a><span class="fu">library</span>(ggplot2)</span>
+<span id="cb1-5"><a href="#cb1-5"></a><span class="fu">library</span>(lubridate)</span>
+<span id="cb1-6"><a href="#cb1-6"></a><span class="fu">library</span>(tidyr)</span>
+<span id="cb1-7"><a href="#cb1-7"></a><span class="fu">library</span>(purrr)</span>
+<span id="cb1-8"><a href="#cb1-8"></a></span>
+<span id="cb1-9"><a href="#cb1-9"></a><span class="co"># Places</span></span>
+<span id="cb1-10"><a href="#cb1-10"></a>PQDIR <span class="ot">&lt;-</span> <span class="st">"~/osfdata/parquet"</span></span>
+<span id="cb1-11"><a href="#cb1-11"></a></span>
+<span id="cb1-12"><a href="#cb1-12"></a><span class="co"># Helper functions</span></span>
+<span id="cb1-13"><a href="#cb1-13"></a>open_parquet <span class="ot">&lt;-</span> <span class="cf">function</span>(<span class="at">dir =</span> PQDIR, tbl) {</span>
+<span id="cb1-14"><a href="#cb1-14"></a>    arrow<span class="sc">::</span><span class="fu">open_dataset</span>(<span class="fu">file.path</span>(dir, <span class="fu">paste0</span>(tbl, <span class="st">".parquet"</span>)))</span>
+<span id="cb1-15"><a href="#cb1-15"></a>}</span>
+<span id="cb1-16"><a href="#cb1-16"></a>get_parquet_info <span class="ot">&lt;-</span> <span class="cf">function</span>(<span class="at">dir =</span> PQDIR, tbl) {</span>
+<span id="cb1-17"><a href="#cb1-17"></a>    nanoparquet<span class="sc">::</span><span class="fu">read_parquet_info</span>(<span class="fu">file.path</span>(dir, <span class="fu">paste0</span>(tbl, <span class="st">".parquet"</span>)))</span>
+<span id="cb1-18"><a href="#cb1-18"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 </div>
 <div class="cell">

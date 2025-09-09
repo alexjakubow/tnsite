@@ -7,5 +7,15 @@
 
 /.quarto/
 
+# Credentials
 .env
+.Renviron
+
+# Other files
+*.txt
+R/datamodel
+
+# Other directories
+R/deprecated
 data
+dev
