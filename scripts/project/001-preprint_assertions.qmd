@@ -1,11 +1,11 @@
 ---
-title: "Recipe 001: Preprint Assertions"
+title: "Lifecycle Open Science: OSF Preprint Assertions"
 ---
 
 # Overview
 > **This recipe measures lifecycle open science on OSF by looking at preprint assertions.**
 
-We define a lifecycle open research project as an Open OSF Preprint (see [open-preprints](./open-preprints.qmd)) that meets the following criteria:
+We define a lifecycle open research project as an Open OSF Preprint that meets the following criteria:
 
 1. Has at least 1 linked dataset via author assertion
 2. Has at least 1 linked preregistration via author assertion

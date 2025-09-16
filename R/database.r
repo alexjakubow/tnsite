@@ -17,9 +17,11 @@ last_logged_action <- function(tbl, date_col, status_col, date, ...) {
 }
 
 
-#' Filters a the registration_badges table for finalized artifacts that were:
+#' Filters the registration_badges table for finalized artifacts that were:
 #' 1. Created on/before the specified date
 #' 2. Not deleted or deleted after the specified date.
+#'
+#' And then counts the number of artifacts by type and optional grouping variables.
 #'
 #' @param tbl Registration badges table
 #' @param date Query date
@@ -35,12 +37,18 @@ reg_badge_status <- function(tbl, date, ...) {
     ) |>
     dplyr::summarise(
       .by = c(...),
-      n_artifacts = n()
+      n_artifacts = n(),
+      n_data = sum(artifact_type == "data", na.rm = TRUE),
+      n_materials = sum(artifact_type == "materials", na.rm = TRUE),
+      n_code = sum(artifact_type == "code", na.rm = TRUE),
+      n_supplements = sum(artifact_type == "supplements", na.rm = TRUE),
+      n_papers = sum(artifact_type == "papers", na.rm = TRUE)
     )
 }
 
+#' Calculate the number of linked outcomes and outputs for each registraiton by summing on `artifact_type`
 #' @export
-reg_recipe_status <- function(tbl) {
+reg_recipe_status_typed <- function(tbl) {
   tbl |>
     dplyr::summarise(
       .by = node_id,
@@ -49,5 +57,21 @@ reg_recipe_status <- function(tbl) {
         na.rm = TRUE
       ),
       n_outputs = sum(artifact_type == "papers", na.rm = TRUE)
+    )
+}
+
+
+#' Calculate the number of linked outcomes and outputs for each registraiton by summing across computed counts for each badge type (i.e.g, data, materials, code, supplements, papers
+#'
+#' @export
+reg_recipe_status_summed <- function(tbl) {
+  tbl |>
+    dplyr::summarise(
+      .by = node_id,
+      n_outcomes = sum(
+        n_data + n_materials + n_code + n_supplements,
+        na.rm = TRUE
+      ),
+      n_outputs = sum(n_papers, na.rm = TRUE)
     )
 }

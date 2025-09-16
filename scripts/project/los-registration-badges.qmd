@@ -1,0 +1,201 @@
+---
+title: "Lifecycle Open Science: OSF Registration Badges"
+date: "2025-09-15"
+---
+
+# Overview
+
+> ***This method measures lifecycle open science on OSF by looking at open science practices linked to open science registrations.***
+
+## Definitions
+
+> Open Science Registration (OSR): An OSF Registration that is jointly *open*, *non-deprecated* and *authentic*
+
+- Openness Criteria:
+    1. Public (open-1)
+    2. Not Embargoed (open-2)
+
+- Non-Deprecation Criteria:
+    1. Registered (nondeprecated-1)
+    2. Not Deleted (nondeprecated-2)
+    3. Not Retracted (nondeprecated-3)
+
+- Authenticity Criteria:
+    1. Not Spam (authentic-1)
+
+
+> Lifecycle Open Science Registration (LOS-Reg): An OSR that represents a lifecycle open science research project.
+
+- Lifecycle Opennness Criteria:
+
+    1. The OSR has at least 1 linked [Open Practice Badge](https://help.osf.io/article/452-open-practice-badges) from among: "Data", "Analytic Code", "Materials" or "Supplements".  
+    2. The OSR has at least 1 linked "Papers" Open Practice Badge.
+
+
+# Results
+```{r}
+# Packages
+library(arrow)
+library(gt)
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(timetk)
+
+
+# Modules
+box::use(
+  R / helpers[tidy_registry_names],
+  R / plot[pivoter, factorizer, ts_prep]
+)
+
+# Data sources
+all_ts <- read_parquet(here::here("data/registration_tsmonthly.parquet")) |>
+    filter(date >= "2022-08-01")
+registry_ts <- read_parquet(here::here("data/registration_registries_tsmonthly.parquet")) |>
+    filter(date >= "2022-08-01") |>
+    mutate(registry = tidy_registry_names(registry))
+
+# Pivot for plots and assign labels
+all_summary <- pivoter(all_ts) |>
+    ts_prep()
+registry_summary <- pivoter(registry_ts, registry) |>
+    ts_prep()
+
+# Constants
+MOST_RECENT_CHR <- max(all_ts$date)
+MOST_RECENT <- ymd(MOST_RECENT_CHR)
+TABLE_CRITERIA <- c(
+    "total", "los_plan", "los_outcomes", "los_outputs", "los_complete")
+TABLE_NAMES <- c(
+    "Total", "Open Science Registration (OSR)", "OSR + Outcome(s)", "OSR + Output(s)",
+    "Lifecycle Open Science Registration (LOS-Reg)"
+)
+```
+
+## Today
+
+Here is the current state of LOS research projects on the OSF as of `r max(all_ts$date)`.
+
+
+First, in aggregate:
+
+```{r}
+overall_tbl <- all_summary |>
+    filter(criteria %in% TABLE_CRITERIA) |>
+    pivot_wider(names_from = criteria, values_from = n) 
+names(overall_tbl) <-c("Date", TABLE_NAMES)
+
+overall_tbl <- overall_tbl |>
+    mutate(
+        `LOS-Reg / OSR` = `Lifecycle Open Science Registration (LOS-Reg)` / `Open Science Registration (OSR)`,
+        `LOS-Reg / Total` = `Lifecycle Open Science Registration (LOS-Reg)` / Total
+    )
+
+today_gtbl <- overall_tbl |>
+    filter(Date == MOST_RECENT) |>
+    select(-Date) |>
+    gt() |>
+    tab_header(
+        title = "Lifecycle Open Science Registrations",
+        subtitle = paste0("as of ", MOST_RECENT_CHR)
+    ) |>
+    fmt_number(columns = c(Total:`Lifecycle Open Science Registration (LOS-Reg)`), decimals = 0) |>
+    fmt_percent(columns = c(`LOS-Reg / OSR`, `LOS-Reg / Total`), decimals = 2)
+
+today_gtbl
+```
+
+And also by registry:
+
+```{r}
+registry_tbl <- registry_summary |>
+    filter(criteria %in% TABLE_CRITERIA) |>
+    pivot_wider(id_cols = c(date, registry), names_from = criteria, values_from = n) 
+names(registry_tbl) <-c("Date", "Registry", TABLE_NAMES)
+
+registry_tbl <- registry_tbl |>
+    mutate(
+        `LOS-Reg / OSR` = `Lifecycle Open Science Registration (LOS-Reg)` / `Open Science Registration (OSR)`,
+        `LOS-Reg / Total` = `Lifecycle Open Science Registration (LOS-Reg)` / Total
+    )
+
+today_registry_gtbl <- registry_tbl |>
+    ungroup() |>
+    filter(Date == MOST_RECENT) |>
+    arrange(desc(`Lifecycle Open Science Registration (LOS-Reg)`)) |>
+    select(-Date) |>
+    gt() |>
+    tab_header(
+        title = "Lifecycle Open Science Registrations by Registry",
+        subtitle = paste0("as of ", MOST_RECENT_CHR)
+    ) |>
+        fmt_number(columns = c(Total:`Lifecycle Open Science Registration (LOS-Reg)`), decimals = 0) |>
+    fmt_percent(columns = c(`LOS-Reg / OSR`, `LOS-Reg / Total`), decimals = 2)
+
+today_registry_gtbl
+```
+
+Table values:
+
+Here's a summary table of OSF Registrations by Registry:
+
+- `Total`: Total number of OSF Registrations (no filtering at all)
+- `Open Science Registration (OSR)`: Number of Open Science Registrations (i.e., Open + Non-deprecated + Authentic)
+- `OSR + Outcome(s)`: Number of Open Science Registrations with at least one linked outcome badge
+- `OSR + Output(s)`: Number of Open Science Registrations with at least one linked output badge
+- `Lifecycle Open Science Registration (LOS-Reg)`: Number of Open Science Registrations with at least one linked outcome and at least one linked output badge
+- `LOS-Reg / OSR`: Percentage of Open Science OSF Registrations (OSR) that are Lifecycle Open Science Registrations (LOS-Reg)
+- `LOS-Reg / Total`: Percentage of Total OSF Registrations that are Lifecycle Open Science Registrations (LOS-Reg)
+
+## Time-Series
+
+We first plot the number of OSF Registrations by Lifecycle Open Science Status.
+
+```{r}
+overall_tbl |>
+    select(Date, `Lifecycle Open Science Registration (LOS-Reg)`, `Open Science Registration (OSR)`, `Total`) |>
+    pivot_longer(
+        cols = c(`Lifecycle Open Science Registration (LOS-Reg)`, `Open Science Registration (OSR)`, `Total`),
+        names_to = "Status", values_to = "N") |>
+    plot_time_series(Date, N, .color_var = Status, .smooth = FALSE, .title = "Registrations by Lifecycle Open Science Status")
+```
+
+We can also examine the efficiency of Lifecycle Open Science Registrations over time.
+
+```{r}
+overall_tbl |>
+    select(Date, `LOS-Reg / OSR`, `LOS-Reg / Total`) |>
+    pivot_longer(
+        cols = c(`LOS-Reg / OSR`, `LOS-Reg / Total`),
+        names_to = "Metric", values_to = "Percentage") |>
+    plot_time_series(Date, Percentage, .color_var = Metric, .smooth = FALSE, .title = "Efficiency of Lifecycle Open Science Registrations")
+
+```
+
+We can also plot these numbers over time for each registry.  Because of the disparity in the number of registrations between registries, we calculate the percentage of registrations that meeting Open Science Registration criteria.  This are the `LOS-Reg / OSR`  and `LOS-Reg / Total` metrics from the previous table.
+
+
+```{r}
+registry_ptbl <- registry_tbl |>
+    select(Date, Registry, `LOS-Reg / OSR`, `LOS-Reg / Total`) |>
+    pivot_longer(
+        cols = c(`LOS-Reg / OSR`, `LOS-Reg / Total`),
+        names_to = "Metric", values_to = "Percentage") |>
+    ungroup()
+```
+
+
+```{r}
+registry_ptbl |>
+    filter(Metric == "LOS-Reg / OSR") |>
+    plot_time_series(Date, Percentage, .color_var = Registry,
+    .smooth = FALSE, .title = "OSR Efficiency of Lifecycle Open Science Registrations by Registry")
+```
+
+```{r}
+registry_ptbl |>
+    filter(Metric == "LOS-Reg / Total") |>
+    plot_time_series(Date, Percentage, .color_var = Registry,
+    .smooth = FALSE, .title = "Total Efficiency of Lifecycle Open Science Registrations by Registry")
+```

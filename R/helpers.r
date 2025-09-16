@@ -41,6 +41,14 @@ create_uid <- function(tbl, id, type) {
     dplyr::mutate(uid = paste0(TYPES[type], "_", {{ id }}))
 }
 
+# I/O HELPERS ------------------------------------------------------------------
+#' Open and load a Parquet table from relative path to `data/`
+#' @export
+openup <- function(tbl) {
+  open_parquet(dir = here::here("data"), tbl) |>
+    collect()
+}
+
 
 # GOOGLE HELPERS ---------------------------------------------------------------
 #' Wrapper to authenticate with Google APIs

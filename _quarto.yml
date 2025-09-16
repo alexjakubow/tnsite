@@ -1,6 +1,10 @@
 project:
   type: website
   output-dir: docs
+  render:
+  - "!vignettes/open-preprints.qmd"
+  - "!vignettes/0001-preprint_assertions.qmd"
+
 
 website:
   title: "Tales of True North"
@@ -9,8 +13,10 @@ website:
       - href: index.qmd
         text: Home
       - scripts/component/open-registrations.qmd
-      - scripts/component/open-preprints.qmd
-      - scripts/project/001-preprint_assertions.qmd
+      #- scripts/component/open-preprints.qmd
+      #- scripts/project/001-preprint_assertions.qmd
+      - href: scripts/projects/los-registration-badges.qmd
+        text: LOS Registration Badges
 
 format:
   html:
